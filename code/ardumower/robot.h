@@ -29,147 +29,113 @@
 #include <Arduino.h>
 #include <Wire.h>  
 #ifdef __AVR__
-  // Arduino Mega
-  #include <EEPROM.h>
+// Arduino Mega
+#include <EEPROM.h>
 #else
-  // Arduino Due
+// Arduino Due
 #endif
 //#include <Servo.h>  // for RC brushless contoller
+
+//#define HAVE_GPS 1
+//#define HAVE_IMU 1
+//#define HAVE_PERIMETER 1
+
 #include "drivers.h"
 #include "pid.h"
+#ifdef HAVE_IMU
 #include "imu.h"
+#endif
 #include "adcman.h"
+#ifdef HAVE_PERIMETER
 #include "perimeter.h"
+#endif
+#ifdef HAVE_GPS
 #include "gps.h"
+#endif
 #include "pfod.h"
 #include "RunningMedian.h"
 
 //#include "QueueList.h"
 //#include <limits.h>
 
+#define VER "Snaker 0.1"
 
-// choose PCB
-
-/*
-  Generic robot class - subclass to implement concrete hardware!
-
-*/
-
-// code version 
-#define VER "1.0a10-dev Azurit"
- 
-
-// sensors
-enum {
-  SEN_PERIM_LEFT,        // 0..MAX_PERIMETER
-  SEN_PERIM_RIGHT,       // 0..MAX_PERIMETER
-  SEN_PERIM_LEFT_EXTRA,  // 0..MAX_PERIMETER
-  SEN_PERIM_RIGHT_EXTRA, // 0..MAX_PERIMETER
-  SEN_LAWN_FRONT,        
-  SEN_LAWN_BACK,         
-  SEN_BAT_VOLTAGE,       // Volt * 100
-  SEN_CHG_CURRENT,       // Ampere * 100
-  SEN_CHG_VOLTAGE,       // Volt * 100
-  SEN_MOTOR_LEFT,        // 0..MAX_MOTOR_CURRENT
-  SEN_MOTOR_RIGHT,       // 0..MAX_MOTOR_CURRENT
-  SEN_MOTOR_MOW,         // 0..MAX_MOW_CURRENT
-  SEN_BUMPER_LEFT,       // LOW = pressed
-  SEN_BUMPER_RIGHT,      // LOW = pressed
-  SEN_DROP_LEFT,       // LOW = pressed                                                                                                  // Dropsensor - Absturzsensor
-  SEN_DROP_RIGHT,      // LOW = pressed                                                                                                  // Dropsensor - Absturzsensor  
-  SEN_SONAR_CENTER,      // 0..SONAR_TRIGGER_DISTANCE
-  SEN_SONAR_LEFT,        // 0..SONAR_TRIGGER_DISTANCE
-  SEN_SONAR_RIGHT,       // 0..SONAR_TRIGGER_DISTANCE
-  SEN_BUTTON,            // LOW = pressed
-  SEN_IMU,             
-  SEN_MOTOR_MOW_RPM,
-  SEN_RTC,
-  SEN_RAIN,
-  SEN_TILT,
-  SEN_FREE_WHEEL,    
+enum sensor {
+    SEN_PERIM_LEFT   // 0..MAX_PERIMETER
+    , SEN_PERIM_RIGHT   // 0..MAX_PERIMETER
+    , SEN_PERIM_LEFT_EXTRA   // 0..MAX_PERIMETER
+    , SEN_PERIM_RIGHT_EXTRA   // 0..MAX_PERIMETER
+    , SEN_LAWN_FRONT 
+    , SEN_LAWN_BACK 
+    , SEN_BAT_VOLTAGE   // Volt * 100
+    , SEN_CHG_CURRENT   // Ampere * 100
+    , SEN_CHG_VOLTAGE   // Volt * 100
+    , SEN_MOTOR_LEFT   // 0..MAX_MOTOR_CURRENT
+    , SEN_MOTOR_RIGHT   // 0..MAX_MOTOR_CURRENT
+    , SEN_MOTOR_MOW   // 0..MAX_MOW_CURRENT
+    , SEN_BUMPER_LEFT   // LOW = pressed
+    , SEN_BUMPER_RIGHT   // LOW = pressed
+    , SEN_DROP_LEFT   // LOW = pressed                                                                                                    // Dropsensor - Absturzsensor
+    , SEN_DROP_RIGHT   // LOW = pressed                                                                                                    // Dropsensor - Absturzsensor  
+    , SEN_SONAR_CENTER   // 0..SONAR_TRIGGER_DISTANCE
+    , SEN_SONAR_LEFT   // 0..SONAR_TRIGGER_DISTANCE
+    , SEN_SONAR_RIGHT   // 0..SONAR_TRIGGER_DISTANCE
+    , SEN_BUTTON   // LOW = pressed
+    , SEN_IMU
+    , SEN_MOTOR_MOW_RPM
+    , SEN_RTC
+    , SEN_RAIN
+    , SEN_TILT
+    , SEN_FREE_WHEEL 
 };
 
-// actuators
-enum {
-  ACT_MOTOR_LEFT,
-  ACT_MOTOR_RIGHT,
-  ACT_MOTOR_MOW,
-  ACT_BUZZER,
-  ACT_LED,
-  ACT_USER_SW1,
-  ACT_USER_SW2,
-  ACT_USER_SW3,    
-  ACT_RTC,
-  ACT_CHGRELAY,
-  ACT_BATTERY_SW,
+enum actuator {
+    ACT_MOTOR_LEFT
+    , ACT_MOTOR_RIGHT
+    , ACT_MOTOR_MOW
+    , ACT_BUZZER
+    , ACT_LED
+    , ACT_USER_SW1
+    , ACT_USER_SW2
+    , ACT_USER_SW3    
+    , ACT_RTC
+    , ACT_CHGRELAY
+    , ACT_BATTERY_SW
 };
 
-// error types
-enum {
-  ERR_MOTOR_LEFT,
-  ERR_MOTOR_RIGHT,
-  ERR_MOTOR_MOW,
-  ERR_MOW_SENSE,
-  ERR_IMU_COMM,
-  ERR_IMU_TILT,
-  ERR_RTC_COMM,
-  ERR_RTC_DATA,
-  ERR_PERIMETER_TIMEOUT,
-  ERR_TRACKING,
-  ERR_ODOMETRY_LEFT,
-  ERR_ODOMETRY_RIGHT,
-  ERR_BATTERY,
-  ERR_CHARGER,
-  ERR_GPS_COMM,
-  ERR_GPS_DATA,
-  ERR_ADC_CALIB,
-  ERR_IMU_CALIB,
-  ERR_EEPROM_DATA,
-  ERR_STUCK,
-	ERR_CPU_SPEED,
-  // <---- add new error types here (NOTE: increase MAGIC to avoid corrupt EEPROM error data!)
-  ERR_ENUM_COUNT,  
+enum error {
+    ERR_MOTOR_LEFT
+    , ERR_MOTOR_RIGHT
+    , ERR_MOTOR_MOW
+    , ERR_MOW_SENSE
+    , ERR_IMU_COMM
+    , ERR_IMU_TILT
+    , ERR_RTC_COMM
+    , ERR_RTC_DATA
+    , ERR_PERIMETER_TIMEOUT
+    , ERR_TRACKING
+    , ERR_ODOMETRY_LEFT
+    , ERR_ODOMETRY_RIGHT
+    , ERR_BATTERY
+    , ERR_CHARGER
+    , ERR_GPS_COMM
+    , ERR_GPS_DATA
+    , ERR_ADC_CALIB
+    , ERR_IMU_CALIB
+    , ERR_EEPROM_DATA
+    , ERR_STUCK
+	, ERR_CPU_SPEED
+    // <---- add new error types here (NOTE: increase MAGIC to avoid corrupt EEPROM error data!)
+    , ERR_ENUM_COUNT
 };  
 
-// finate state machine states
-enum { 
-  STATE_OFF,          // off
-  STATE_ROS,          // Linux ROS control
-  STATE_REMOTE,       // model remote control (R/C)
-  STATE_FORWARD,      // drive forward
-  STATE_ROLL,         // drive roll right/left  
-  STATE_REVERSE,      // drive reverse
-
-  STATE_CIRCLE,       // drive circle  
-  STATE_ERROR,        // error
-  STATE_PERI_FIND,    // perimeter find 
-  STATE_PERI_TRACK,   // perimeter track
-  STATE_PERI_ROLL,    // perimeter roll
-  STATE_PERI_REV,     // perimeter reverse
-  STATE_STATION,       // in station
-  STATE_STATION_CHARGING,       // in station charging
-  STATE_STATION_CHECK, //checks if station is present
-  STATE_STATION_REV,   // charge reverse
-  STATE_STATION_ROLL,  // charge roll
-  STATE_STATION_FORW,  // charge forward
-  STATE_MANUAL,       // manual navigation  
-  STATE_ROLL_WAIT,    // drive roll right/left
-  STATE_PERI_OUT_FORW, // outside perimeter forward driving without checkPerimeterBoundary()
-  STATE_PERI_OUT_REV,   // outside perimeter reverse driving without checkPerimeterBoundary()
-  STATE_PERI_OUT_ROLL,   // outside perimeter rolling driving without checkPerimeterBoundary()
-  STATE_TILT_STOP,    // tilt sensor activated, stop motors, wait for un-tilt
-  STATE_BUMPER_REVERSE,      // drive reverse
-  STATE_BUMPER_FORWARD,      // drive forward	
-};
-
-// roll types
-enum { LEFT, RIGHT };
-
-// mow patterns
-enum { MOW_RANDOM, MOW_LANES, MOW_BIDIR };
-
 // console mode
-enum { CONSOLE_SENSOR_COUNTERS, CONSOLE_SENSOR_VALUES, CONSOLE_PERIMETER, CONSOLE_OFF };
+enum console_mode {
+    CONSOLE_SENSOR_COUNTERS
+    , CONSOLE_SENSOR_VALUES
+    , CONSOLE_PERIMETER
+    , CONSOLE_OFF
+};
 
 
 #define MAX_TIMERS 5
@@ -178,7 +144,7 @@ enum { CONSOLE_SENSOR_COUNTERS, CONSOLE_SENSOR_VALUES, CONSOLE_PERIMETER, CONSOL
 
 class Robot
 {
-  public:    
+public:    
     String name;
     bool developerActive;
     // --------- state machine --------------------------
@@ -219,7 +185,7 @@ class Robot
     char odometryUse       ;       // use odometry?
     int wheelDiameter     ;        // wheel diameter (mm)
     char twoWayOdometrySensorUse;  // use optional two-wire odometry sensor?
-    int odometryTicksPerRevolution ;   // encoder ticks per one full resolution
+    int odometryTicksPerRevolution ;   // encoder ticks per one full revolution
     float odometryTicksPerCm ;  // encoder ticks per cm
     float odometryWheelBaseCm ;    // wheel-to-wheel distance (cm)
     bool odometryRightSwapDir;       // inverse right encoder direction?
@@ -238,7 +204,7 @@ class Robot
     unsigned long lastMotorRpmTime ;     
     unsigned long nextTimeOdometry ;
     unsigned long nextTimeOdometryInfo ; 
-		boolean odoLeftRightCorrection;
+    boolean odoLeftRightCorrection;
     // -------- RC remote control state -----------------    
     char remoteUse      ;       // use model remote control (R/C)?
     int remoteSteer ;  // range -100..100
@@ -408,7 +374,7 @@ class Robot
     char sonarRightUse;
     char sonarCenterUse;
     int sonarTriggerBelow ;    // ultrasonic sensor trigger distance
-		int sonarSlowBelow ;    
+    int sonarSlowBelow ;    
     unsigned int sonarDistCenter ;
     unsigned int sonarDistRight ;
     unsigned int sonarDistLeft ; 
@@ -434,8 +400,8 @@ class Robot
     String rosPar6;
     // ----- other -----------------------------------------
     char lastSensorTriggered;          // last triggered sensor
-		unsigned long lastSensorTriggeredTime;
-		char buttonUse         ;       // has digital ON/OFF button?
+    unsigned long lastSensorTriggeredTime;
+    char buttonUse         ;       // has digital ON/OFF button?
     // ----- user-defined switch ---------------------------
     char userSwitch1       ;       // user-defined switch 1 (default value)
     char userSwitch2       ;       // user-defined switch 2 (default value)
@@ -482,7 +448,7 @@ class Robot
     byte errorCounter[ERR_ENUM_COUNT];    // temporary error counts (will be resetted periodically)
     // --------- other ----------------------------------
     int loopsPerSec ;  // main loops per second
-		byte loopsPerSecLowCounter ;  
+    byte loopsPerSecLowCounter ;  
     float loopsTa ;   // main loop-time factor (milliseconds)
     int loopsPerSecCounter ;
     byte buttonCounter ;
@@ -546,7 +512,7 @@ class Robot
     
     // call this from R/C control interrupt
     virtual void setRemotePPMState(unsigned long timeMicros, boolean remoteSpeedState, boolean remoteSteerState, 
-      boolean remoteMowState, boolean remoteSwitchState);    
+                                   boolean remoteMowState, boolean remoteSwitchState);    
     //Ehl
     // call this from odometry interrupt
     //virtual void setOdometryState(unsigned long timeMicros, boolean odometryLeftState, boolean odometryRightState, 
@@ -582,7 +548,7 @@ class Robot
     virtual void addErrorCounter(byte errType);    
     virtual void resetErrorCounters();
     virtual void resetMotorFault(){}
-		virtual const char *lastSensorTriggeredName();
+    virtual const char *lastSensorTriggeredName();
 
 protected:
     // convert ppm time to RC slider value
@@ -635,10 +601,10 @@ protected:
     
     // set reverse
     virtual void reverseOrBidir(byte aRollDir);    
-		virtual void reverseOrBidirBumper(byte aRollDir);
+    virtual void reverseOrBidirBumper(byte aRollDir);
     
     // other		
-	  virtual void setSensorTriggered(char type);
+    virtual void setSensorTriggered(char type);
     virtual void printRemote();
     virtual void printOdometry();
     virtual void printMenu();    
@@ -646,7 +612,7 @@ protected:
     virtual void delayInfo(int ms);    
     virtual void testOdometry();
     virtual void testMotors();
-		virtual void testRTC();
+    virtual void testRTC();
     virtual void setDefaults();    
     virtual void receiveGPSTime();
     virtual void calcOdometry();
@@ -676,10 +642,10 @@ protected:
     virtual void rmcsSendOff(Stream &s);   
     virtual void rmcsSendConfig(Stream &s);
     virtual void rmcsSendSensorTriggered(char type);
-		// Spannungsteiler Gesamtspannung ermitteln (Reihenschaltung R1-R2, U2 bekannt, U_GES zu ermitteln)
-		virtual float voltageDividerUges(float R1, float R2, float U2);	
-		// ADC-value to voltage
-		virtual float ADC2voltage(float ADCvalue);
+    // Spannungsteiler Gesamtspannung ermitteln (Reihenschaltung R1-R2, U2 bekannt, U_GES zu ermitteln)
+    virtual float voltageDividerUges(float R1, float R2, float U2);	
+    // ADC-value to voltage
+    virtual float ADC2voltage(float ADCvalue);
 
 };    
 
